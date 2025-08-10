@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
+<meta http-equiv="X-UA-Compatible" content="IE=edge" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Simple Elevation</title>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@200;300;600;700;800&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
@@ -34,7 +35,9 @@
   .viz{padding:12px}
   #svgWrap{background:#fff;border:1px dashed var(--border);border-radius:18px;overflow:visible;position:relative}
   svg{display:block;max-width:100%;height:auto;cursor:crosshair}
+  svg.panning{cursor:grabbing}
   .toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+  .toolbar .inline{display:flex;align-items:center;gap:8px}
 </style>
 </head>
 <body>
@@ -87,6 +90,7 @@
         <button id="addPoi" class="pink" disabled>Add POI</button>
         <button id="clearPois" class="ghost" disabled>Clear POIs</button>
       </div>
+
       <p id="modeHint" style="display:none;margin-top:10px;font-size:12px;color:#334155;background:#f1f5ff;border:1px solid #e0e7ff;padding:8px;border-radius:12px"></p>
 
       <h3 style="margin:16px 0 8px 0">Climbs</h3>
@@ -95,12 +99,16 @@
       <div id="poiList" class="list">No POIs yet</div>
 
       <div class="toolbar">
-        <button id="exportSvg" class="ghost">Export SVG</button>
-        <button id="exportPng" class="ghost">Export PNG</button>
+        <button id="exportSvg" class="ghost" disabled>Export SVG</button>
+        <button id="exportPng" class="ghost" disabled>Export PNG</button>
+        <div class="inline"><label for="pngWidth">PNG width</label><input id="pngWidth" type="number" min="640" step="160" value="3840" style="width:110px"></div>
+        <div class="inline"><label for="pngBg">Background</label>
+          <select id="pngBg"><option value="#ffffff">White</option><option value="transparent">Transparent</option></select>
+        </div>
       </div>
 
       <div style="margin-top:10px" class="muted">
-        <strong>Zoom:</strong> wheel · <strong>Pan:</strong> <kbd>Shift</kbd> + wheel (both directions) · <strong>Reset:</strong> double‑click
+        <strong>Zoom:</strong> wheel · <strong>Pan:</strong> <kbd>Shift</kbd> + wheel (both directions) · <strong>Reset:</strong> double‑click · <strong>Cancel mode:</strong> <kbd>Esc</kbd>
       </div>
     </div>
   </section>
@@ -113,21 +121,11 @@
 </main>
 
 <script>
+"use strict";
 const NS='http://www.w3.org/2000/svg';
 const COLORS={ pink:'#ff2d96', fill:'#fbf6ea', grid:'#e8edf2', green:'#15a34a', axis:'#475569', text:'#0f172a' };
 
-function splitTwoLines(str, maxChars){
-  if(!str) return [];
-  const s=str.trim().toUpperCase();
-  if(s.length<=maxChars) return [s];
-  const words=s.split(/\s+/);
-  if(words.length===1){ const mid=Math.ceil(s.length/2); return [s.slice(0,mid), s.slice(mid)]; }
-  let line1='', line2='';
-  for(const w of words){ const cand=(line1? line1+' ':'')+w; if(cand.length<=maxChars) line1=cand; else line2=(line2? line2+' ':'')+w; }
-  if(!line1){ const mid=Math.ceil(s.length/2); return [s.slice(0,mid), s.slice(mid)]; }
-  return line2? [line1, line2] : [line1];
-}
-
+function splitTwoLines(str, maxChars){ if(!str) return []; const s=(str+"").trim().toUpperCase(); if(s.length<=maxChars) return [s]; const words=s.split(/\s+/); if(words.length===1){ const mid=Math.ceil(s.length/2); return [s.slice(0,mid), s.slice(mid)]; } let l1='', l2=''; for(const w of words){ const cand=(l1? l1+' ':'')+w; if(cand.length<=maxChars) l1=cand; else l2=(l2? l2+' ':'')+w; } if(!l1){ const mid=Math.ceil(s.length/2); return [s.slice(0,mid), s.slice(mid)]; } return l2? [l1,l2] : [l1]; }
 function haversine(lat1, lon1, lat2, lon2){ const R=6371000; const toRad=x=>x*Math.PI/180; const dLat=toRad(lat2-lat1), dLon=toRad(lon2-lon1); const a=Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2; return 2*R*Math.atan2(Math.sqrt(a),Math.sqrt(1-a)); }
 function movingAverage(arr, windowMeters, distances){ if(!windowMeters||windowMeters<=0) return arr.slice(); const out=new Array(arr.length).fill(0), half=windowMeters/2; let i0=0; for(let i=0;i<arr.length;i++){ const c=distances[i]; while(distances[i0]<c-half && i0<i) i0++; let i1=i0; while(i1<arr.length && distances[i1]<=c+half) i1++; const s=arr.slice(i0,i1); out[i]=s.reduce((a,b)=>a+b,0)/Math.max(1,s.length);} return out; }
 
@@ -142,22 +140,23 @@ const smoothInput=document.getElementById('smooth');
 const tickInput=document.getElementById('tick');
 const vExagInput=document.getElementById('vex');
 const vExagOut=document.getElementById('vexOut');
-const modeHint=document.getElementById('modeHint');
-const climbList=document.getElementById('climbList');
-const poiList=document.getElementById('poiList');
 const addClimbBtn=document.getElementById('addClimb');
 const clearClimbsBtn=document.getElementById('clearClimbs');
 const addPoiBtn=document.getElementById('addPoi');
 const clearPoisBtn=document.getElementById('clearPois');
 const exportSvgBtn=document.getElementById('exportSvg');
 const exportPngBtn=document.getElementById('exportPng');
+const pngWidthInput=document.getElementById('pngWidth');
+const pngBgSelect=document.getElementById('pngBg');
+const modeHint=document.getElementById('modeHint');
 
-vExagOut.textContent='× '+parseFloat(vExagInput.value).toFixed(1);
 function setButtonsEnabled(b){ [addClimbBtn,clearClimbsBtn,addPoiBtn,clearPoisBtn,exportSvgBtn,exportPngBtn].forEach(el=>el.disabled=!b); }
+function setMode(mode){ state.selecting=mode; if(mode===null || mode==='start'){ state.tempStart=null; } if(mode==='start'){ modeHint.style.display='block'; modeHint.textContent='Climb mode: click START, then END on the profile.'; } else if(mode==='end'){ modeHint.style.display='block'; modeHint.textContent='Climb mode: click the END point.'; } else if(mode==='poi'){ modeHint.style.display='block'; modeHint.textContent='POI mode: click the point on the profile.'; } else { modeHint.style.display='none'; } }
+window.addEventListener('keydown', e=>{ if(e.key==='Escape') setMode(null); });
 
-// Load GPX
+// ===== Load GPX =====
 gpxInput.addEventListener('change', async e=>{
-  try{ const file=e.target.files[0]; if(!file) return; const text=await file.text(); const xml=new DOMParser().parseFromString(text,'application/xml'); const nodes=[...xml.querySelectorAll('trkpt')]; if(!nodes.length){ alert('No trkpt points in the GPX.'); return; } const pts=[]; let dCum=0; for(let i=0;i<nodes.length;i++){ const n=nodes[i]; const lat=parseFloat(n.getAttribute('lat')); const lon=parseFloat(n.getAttribute('lon')); const eleNode=n.querySelector('ele'); const ele=eleNode?parseFloat(eleNode.textContent):0; if(i>0){ const p=pts[i-1]; dCum+=haversine(p.lat,p.lon,lat,lon); } pts.push({lat,lon,ele,d:dCum}); } const windowM=parseFloat(smoothInput.value||0); const smoothed=movingAverage(pts.map(p=>p.ele), windowM, pts.map(p=>p.d)); pts.forEach((p,i)=>p.eleS=smoothed[i]); state.points=pts; state.minEle=Math.min(...pts.map(p=>p.eleS)); state.maxEle=Math.max(...pts.map(p=>p.eleS)); state.climbs=[]; state.pois=[]; setButtonsEnabled(true); state.viewStart=0; state.viewEnd=pts[pts.length-1].d; modeHint.style.display='none'; draw(); }catch(err){ alert('Unable to open the GPX.'); }
+  try{ const file=e.target.files[0]; if(!file) return; const text=await file.text(); const xml=new DOMParser().parseFromString(text,'application/xml'); const nodes=[...xml.querySelectorAll('trkpt')]; if(!nodes.length){ alert('No trkpt points in the GPX.'); return; } const pts=[]; let dCum=0; for(let i=0;i<nodes.length;i++){ const n=nodes[i]; const lat=parseFloat(n.getAttribute('lat')); const lon=parseFloat(n.getAttribute('lon')); const eleNode=n.querySelector('ele'); const ele=eleNode?parseFloat(eleNode.textContent):0; if(i>0){ const p=pts[i-1]; dCum+=haversine(p.lat,p.lon,lat,lon); } pts.push({lat,lon,ele,d:dCum}); } const windowM=parseFloat(smoothInput.value||0); const smoothed=movingAverage(pts.map(p=>p.ele), windowM, pts.map(p=>p.d)); pts.forEach((p,i)=>p.eleS=smoothed[i]); state.points=pts; state.minEle=Math.min(...pts.map(p=>p.eleS)); state.maxEle=Math.max(...pts.map(p=>p.eleS)); state.climbs=[]; state.pois=[]; setButtonsEnabled(true); exportSvgBtn.disabled=false; exportPngBtn.disabled=false; setMode(null); state.viewStart=0; state.viewEnd=pts[pts.length-1].d; renderClimbList(); renderPoiList(); draw(); }catch(err){ alert('Unable to open the GPX.'); }
 });
 
 [startLabel,finishLabel,tickInput].forEach(el=> el.addEventListener('input', ()=> state.points.length && draw()));
@@ -166,9 +165,9 @@ smoothInput.addEventListener('input', ()=>{ if(!state.points.length) return; con
 
 vExagInput.addEventListener('input', ()=>{ state.vExag=parseFloat(vExagInput.value); vExagOut.textContent='× '+state.vExag.toFixed(1); state.points.length && draw(); });
 
-addClimbBtn.addEventListener('click', ()=>{ if(!state.points.length) return; state.selecting='start'; state.tempStart=null; modeHint.style.display='block'; modeHint.textContent='Climb mode: click START, then END on the profile.'; });
+addClimbBtn.addEventListener('click', ()=>{ if(!state.points.length) return; setMode('start'); });
 clearClimbsBtn.addEventListener('click', ()=>{ state.climbs=[]; renderClimbList(); draw(); });
-addPoiBtn.addEventListener('click', ()=>{ if(!state.points.length) return; state.selecting='poi'; modeHint.style.display='block'; modeHint.textContent='POI mode: click the point on the profile.'; });
+addPoiBtn.addEventListener('click', ()=>{ if(!state.points.length) return; setMode('poi'); });
 clearPoisBtn.addEventListener('click', ()=>{ state.pois=[]; renderPoiList(); draw(); });
 
 function getScales(){
@@ -178,28 +177,31 @@ function getScales(){
   const padBottom=100;
   const min=Math.floor((state.minEle - padBottom)/50)*50;
   const max=Math.ceil((state.maxEle + 20)/50)*50;
-  const viewStart=Math.max(0, Math.min(state.viewStart, dMax-1));
+  const viewStart=Math.max(0, Math.min(state.viewStart, Math.max(0,dMax-1)));
   const viewEnd=Math.max(viewStart+1, Math.min(state.viewEnd, dMax));
   return { margin,w,h,
     xScale:{ f:x=> (margin.l + ((x-viewStart)/(viewEnd-viewStart))*w), invert:X=> (viewStart + ((X-margin.l)/Math.max(1,w))*(viewEnd-viewStart)) },
-    yScale:{ f:y=>{ const base=(y-min)/(max-min); let Y=margin.t + h - base*h*state.vExag; if(Y<margin.t)Y=margin.t; if(Y>margin.t+h)Y=margin.t+h; return Y; }, min,max }
+    yScale:{ f:y=>{ const base=(y-min)/(max-min); let Y=margin.t + h - base*h*state.vExag; if(Y<margin.t)Y=margin.t; if(Y>margin.t+h)Y=margin.t+h; return Y; }, min,max },
+    viewStart, viewEnd
   };
 }
 
 function nearestIndex(arr,val){ let best=0,d=Infinity; for(let i=0;i<arr.length;i++){ const di=Math.abs(arr[i]-val); if(di<d){d=di; best=i;} } return best; }
 
-// Wheel zoom; Shift+wheel pan (both directions); dblclick reset
+let hitBoxEl=null; // updated at each draw
+function dFromClientX(clientX){ if(!hitBoxEl) return null; const r=hitBoxEl.getBoundingClientRect(); const t=(clientX - r.left)/r.width; const xRel=Math.min(1, Math.max(0, t)); const {viewStart,viewEnd}=getScales(); return viewStart + xRel*(viewEnd-viewEnd + viewEnd - viewStart); }
+// (fix bug) the above formula is wrong; correct implementation below will replace it after draw() defines hitBoxEl
+
+// Zoom/Pan
 svg.addEventListener('wheel', e=>{
-  if(!state.points.length) return;
-  e.preventDefault();
+  if(!state.points.length) return; e.preventDefault();
   const {margin,w}=getScales();
-  const rect=svg.getBoundingClientRect();
   if(e.shiftKey){
     const span=state.viewEnd-state.viewStart;
-    const dominant=Math.abs(e.deltaX)>Math.abs(e.deltaY)? e.deltaX : e.deltaY; // support trackpad/mouse
+    const dominant=Math.abs(e.deltaX)>Math.abs(e.deltaY)? e.deltaX : e.deltaY;
     if(dominant!==0){
-      const dir = dominant>0 ? 1 : -1; // >0 pan right, <0 pan left
-      const delta = dir * span * 0.10; // 10% of view per notch
+      const dir=dominant>0?1:-1;
+      const delta=dir*span*0.10;
       let s=state.viewStart+delta, en=state.viewEnd+delta;
       const dMax=state.points[state.points.length-1].d;
       if(s<0){ en-=s; s=0; }
@@ -207,6 +209,7 @@ svg.addEventListener('wheel', e=>{
       state.viewStart=s; state.viewEnd=en; draw();
     }
   } else {
+    const rect=svg.getBoundingClientRect();
     const xRel=(e.clientX-rect.left-margin.l)/Math.max(1,w);
     const span=state.viewEnd-state.viewStart;
     const factor=(e.deltaY<0)?0.85:1.15;
@@ -218,16 +221,28 @@ svg.addEventListener('wheel', e=>{
     en=s+newSpan;
     state.viewStart=s; state.viewEnd=en; draw();
   }
-}, {passive:false});
+},{passive:false});
 
 svg.addEventListener('dblclick', ()=>{ if(!state.points.length) return; const dMax=state.points[state.points.length-1].d; state.viewStart=0; state.viewEnd=dMax; draw(); });
 
-svg.addEventListener('click', e=>{ if(!state.selecting) return; const pt=svg.createSVGPoint(); pt.x=e.clientX; pt.y=e.clientY; const loc=pt.matrixTransform(svg.getScreenCTM().inverse()); const {xScale}=getScales(); const dClick=xScale.invert(loc.x); const idx=nearestIndex(state.points.map(p=>p.d), dClick); if(state.selecting==='start'){ state.tempStart=idx; state.selecting='end'; modeHint.style.display='block'; modeHint.textContent='Climb mode: click the END point.'; } else if(state.selecting==='end'){ if(idx<=state.tempStart){ alert('END must be after START.'); return; } state.climbs.push({startIdx:state.tempStart, endIdx:idx, name:''}); state.selecting=null; state.tempStart=null; modeHint.style.display='none'; renderClimbList(); draw(); } else if(state.selecting==='poi'){ state.pois.push({idx, name:''}); state.selecting=null; modeHint.style.display='none'; renderPoiList(); draw(); } });
+// Selection on svg (uses precise hitbox mapping)
+svg.addEventListener('click', e=>{
+  if(!state.selecting || !state.points.length) return;
+  if(!hitBoxEl){ return; }
+  const r=hitBoxEl.getBoundingClientRect();
+  const t=(e.clientX - r.left)/r.width; const xRel=Math.min(1, Math.max(0, t));
+  const {viewStart,viewEnd}=getScales();
+  const dClick = viewStart + xRel*(viewEnd - viewStart);
+  const idx=nearestIndex(state.points.map(p=>p.d), dClick);
+  if(state.selecting==='start'){ state.tempStart=idx; setMode('end'); }
+  else if(state.selecting==='end'){
+    if(idx<=state.tempStart){ alert('END must be after START.'); return; }
+    state.climbs.push({startIdx:state.tempStart, endIdx:idx, name:''}); setMode(null); renderClimbList(); draw();
+  } else if(state.selecting==='poi'){ state.pois.push({idx, name:''}); setMode(null); renderPoiList(); draw(); }
+});
 
-function createEl(tag, attrs={}){ const el=document.createElementNS(NS,tag); for(const [k,v] of Object.entries(attrs)) el.setAttribute(k,v); return el; }
+function createEl(tag, attrs={}){ const el=document.createElementNS(NS,tag); for(const k in attrs){ el.setAttribute(k, attrs[k]); } return el; }
 function pathFrom(points, close=false, margin=null, h=null){ if(!points.length) return ''; const d=['M',points[0].x,points[0].y].join(' '); const seg=points.slice(1).map(p=>'L '+p.x+' '+p.y).join(' '); let res=d+' '+seg; if(close&&margin){ res += ` L ${margin.l + (1280 - margin.l - margin.r)} ${margin.t + h} L ${margin.l} ${margin.t + h} Z`; } return res; }
-function bboxScreen(el){ const bb=el.getBBox(); const m=el.getCTM(); if(!m) return bb; const toP=(x,y)=>({x:x*m.a+y*m.c+m.e, y:x*m.b+y*m.d+m.f}); const p1=toP(bb.x,bb.y), p2=toP(bb.x+bb.width,bb.y), p3=toP(bb.x,bb.y+bb.height), p4=toP(bb.x+bb.width,bb.y+bb.height); const xs=[p1.x,p2.x,p3.x,p4.x], ys=[p1.y,p2.y,p3.y,p4.y]; const minX=Math.min(...xs), maxX=Math.max(...xs), minY=Math.min(...ys), maxY=Math.max(...ys); return {x:minX,y:minY,width:maxX-minX,height:maxY-minY}; }
-function intersectsProfile(bb, profilePts){ const x1=bb.x-1, x2=bb.x+bb.width+1, y1=bb.y-1, y2=bb.y+bb.height+1; for(let i=0;i<profilePts.length;i++){ const p=profilePts[i]; if(p.x>=x1 && p.x<=x2 && p.y>=y1 && p.y<=y2) return true; } return false; }
 
 function draw(){
   svg.innerHTML='';
@@ -247,101 +262,73 @@ function draw(){
   const xEndTick=xScale.f(dMax); if(xEndTick>=margin.l && xEndTick<=margin.l+w){ gTicks.appendChild(createEl('line',{x1:xEndTick,y1:yBase,x2:xEndTick,y2:yBase+tickLen+2,stroke:'#111827','stroke-width':1.4})); gTicks.appendChild(createEl('text',{x:xEndTick,y:yBase+tickLen+16,'text-anchor':'middle','font-size':'11',fill:'#111827','font-weight':'700'})).textContent=dMaxKm.toFixed(1); }
   svg.appendChild(gTicks);
 
-  // window points for drawing & collision tests
-  const iS=nearestIndex(state.points.map(p=>p.d), state.viewStart), iE=nearestIndex(state.points.map(p=>p.d), state.viewEnd);
-  const winPts=state.points.slice(Math.max(0,iS-1), Math.min(state.points.length,iE+2)).map(p=>({x:xScale.f(p.d), y:yScale.f(p.eleS)}));
+  // window points
+  const iS=Math.max(0, state.points.findIndex(p=>p.d>=state.viewStart));
+  const iE=state.points.findIndex(p=>p.d>=state.viewEnd);
+  const endIndex=(iE===-1? state.points.length-1 : iE);
+  const winPts=state.points.slice(Math.max(0,iS-1), Math.min(state.points.length,endIndex+2)).map(p=>({x:xScale.f(p.d), y:yScale.f(p.eleS)}));
 
   // area + main profile
   const dArea=pathFrom(winPts,true,margin,h); svg.appendChild(createEl('path',{d:dArea,fill:COLORS.fill})); svg.appendChild(createEl('path',{d:dArea,fill:'none',stroke:COLORS.pink,'stroke-width':3}));
   const defs=createEl('defs'); const clip=createEl('clipPath',{id:'areaClip'}); clip.appendChild(createEl('path',{d:dArea})); defs.appendChild(clip); svg.appendChild(defs);
 
-  // START/FINISH labels
+  // START/FINISH
   const sTxt=(startLabel.value||'START').toUpperCase(); const fTxt=(finishLabel.value||'FINISH').toUpperCase(); const x0=xScale.f(0), xF=xScale.f(dMax);
   if(x0>=margin.l && x0<=margin.l+w) svg.appendChild(createEl('text',{x:x0,y:margin.t+14,'font-family':'Montserrat, sans-serif','font-weight':'800','font-size':'14','text-anchor':'start'})).textContent=sTxt;
   if(xF>=margin.l && xF<=margin.l+w) svg.appendChild(createEl('text',{x:xF,y:margin.t+14,'font-family':'Montserrat, sans-serif','font-weight':'800','font-size':'14','text-anchor':'end'})).textContent=fTxt;
 
   // CLIMBS
   const gClimbs=createEl('g');
-  const climbsSorted=[...state.climbs].map(c=>({c,x:xScale.f(state.points[c.endIdx].d)})).sort((a,b)=>a.x-b.x);
+  const isValidClimb = (c)=> c && Number.isFinite(c.startIdx) && Number.isFinite(c.endIdx) && state.points[c.startIdx] && state.points[c.endIdx] && c.endIdx>c.startIdx;
+  const climbsValid = state.climbs.filter(isValidClimb);
+  const climbsSorted=climbsValid.map(c=>({c,x:xScale.f(state.points[c.endIdx].d)})).sort((a,b)=>a.x-b.x);
   climbsSorted.forEach(({c,x})=>{
-    const a=state.points[c.startIdx], b=state.points[c.endIdx]; const len=b.d-a.d; const slope=(b.eleS-a.eleS)/len*100;
-    const xA=xScale.f(a.d), xB=xScale.f(b.d);
-    gClimbs.appendChild(createEl('rect',{x:xA,y:margin.t,width:xB-xA,height:h,fill:'rgba(21,163,74,0.10)',"clip-path":"url(#areaClip)"}));
-    const seg=state.points.slice(c.startIdx,c.endIdx+1).map(p=>({x:xScale.f(p.d), y:yScale.f(p.eleS)}));
-    gClimbs.appendChild(createEl('path',{d:pathFrom(seg,false),fill:'none',stroke:COLORS.green,'stroke-width':3}));
-
+    const a=state.points[c.startIdx], b=state.points[c.endIdx]; const len=b.d-a.d; if(!(len>0)) return; const slope=(b.eleS-a.eleS)/len*100; const xA=xScale.f(a.d), xB=xScale.f(b.d);
+    gClimbs.appendChild(createEl('rect',{x:xA,y:margin.t,width:Math.max(0,xB-xA),height:h,fill:'rgba(21,163,74,0.10)',"clip-path":"url(#areaClip)"}));
+    const seg=state.points.slice(c.startIdx,Math.min(state.points.length,c.endIdx+1)).map(p=>({x:xScale.f(p.d), y:yScale.f(p.eleS)}));
+    if(seg.length>=2){ gClimbs.appendChild(createEl('path',{d:pathFrom(seg,false),fill:'none',stroke:COLORS.green,'stroke-width':3})); }
     const yEnd=yScale.f(b.eleS);
     gClimbs.appendChild(createEl('line',{x1:x,y1:yEnd,x2:x,y2:margin.t+h,stroke:'#94a3b8','stroke-width':1}));
     const kmText=createEl('text',{x:x,y:margin.t+h+46,fill:'#111827','font-size':'14','font-weight':'800','text-anchor':'middle',transform:`rotate(-90 ${x} ${margin.t+h+46})`}); kmText.textContent=(b.d/1000).toFixed(1); gClimbs.appendChild(kmText);
-
-    const fullName=(c.name||'').trim().toUpperCase();
-    const nameLines=splitTwoLines(fullName, 16);
-    const meta=`${(len/1000).toFixed(1)} km · ${slope.toFixed(1)}%`;
+    const fullName=(c.name||'').trim().toUpperCase(); const nameLines=splitTwoLines(fullName,16); const meta=`${(len/1000).toFixed(1)} km · ${slope.toFixed(1)}%`;
     const yLabel=Math.max(margin.t+10, yEnd-10);
     const label=createEl('text',{x:x-12,y:yLabel,fill:COLORS.text,'font-size':'12','text-anchor':'start',transform:`rotate(-90 ${x-12} ${yLabel})`});
-    nameLines.forEach((line, idx)=>{ const t=createEl('tspan',{'font-family':'Montserrat, sans-serif','font-weight':'700', x:x-12}); if(idx===0){ t.setAttribute('y', yLabel); } else { t.setAttribute('dy',14); } t.textContent=line; label.appendChild(t); });
+    nameLines.forEach((line, i)=>{ const t=createEl('tspan',{'font-family':'Montserrat, sans-serif','font-weight':'700', x:x-12}); if(i===0) t.setAttribute('y',yLabel); else t.setAttribute('dy',14); t.textContent=line; label.appendChild(t); });
     const tMeta=createEl('tspan',{'font-family':'Montserrat, sans-serif','font-weight':'300', x:x-12}); tMeta.setAttribute('dy',14); tMeta.textContent=meta; label.appendChild(tMeta);
     gClimbs.appendChild(label);
-
-    // collision avoidance: shift left until free from profile
-    let shift=0; const maxIter=30; const profileForHit=winPts;
-    for(let i=0;i<maxIter;i++){
-      label.setAttribute('transform', `rotate(-90 ${x-12-shift} ${yLabel})`);
-      label.setAttribute('x', x-12-shift);
-      label.querySelectorAll('tspan').forEach(ts=> ts.setAttribute('x', x-12-shift));
-      const bb=bboxScreen(label);
-      if(intersectsProfile(bb, profileForHit)) shift+=8; else break;
-    }
+    let shift=0; for(let i=0;i<30;i++){ label.setAttribute('transform',`rotate(-90 ${x-12-shift} ${yLabel})`); label.setAttribute('x',x-12-shift); label.querySelectorAll('tspan').forEach(ts=>ts.setAttribute('x',x-12-shift)); const bb=label.getBBox(); const minSegY = seg.length? Math.min(...seg.map(p=>p.y)) : (margin.t+h); if(bb.y+bb.height > minSegY-2) shift+=8; else break; }
   });
   svg.appendChild(gClimbs);
 
-  // POIs — styled like climbs; vertical line ends at profile intersection
+  // POIs
   const gPois=createEl('g');
-  const poisSorted=[...state.pois].map(p=>({p,x:xScale.f(state.points[p.idx].d)})).sort((a,b)=>a.x-b.x);
+  const poisValid = state.pois.filter(p=> Number.isFinite(p.idx) && state.points[p.idx]);
+  const poisSorted=poisValid.map(p=>({p,x:xScale.f(state.points[p.idx].d)})).sort((a,b)=>a.x-b.x);
   poisSorted.forEach(({p,x})=>{
-    const pt=state.points[p.idx];
-    const yEnd=yScale.f(pt.eleS); // stop at profile
-    // Base tick and km (bold, rotated) like climbs
+    const pt=state.points[p.idx]; const yEnd=yScale.f(pt.eleS);
     gPois.appendChild(createEl('line',{x1:x,y1:margin.t+h,x2:x,y2:margin.t+h+14,stroke:'#111827','stroke-width':1.4}));
     const kmText=createEl('text',{x:x,y:margin.t+h+46,fill:'#111827','font-size':'14','font-weight':'800','text-anchor':'middle',transform:`rotate(-90 ${x} ${margin.t+h+46})`}); kmText.textContent=(pt.d/1000).toFixed(1); gPois.appendChild(kmText);
-    // Vertical guide from profile downwards
     gPois.appendChild(createEl('line',{x1:x,y1:yEnd,x2:x,y2:margin.t+h,stroke:'#94a3b8','stroke-width':1}));
-
-    const fullName=(p.name||'POI').trim().toUpperCase();
-    const nameLines=splitTwoLines(fullName, 16);
-    const meta=`km ${(pt.d/1000).toFixed(1)}`;
-    const yLabel=Math.max(margin.t+10, yEnd-10);
-    const label=createEl('text',{x:x-12,y:yLabel,fill:COLORS.text,'font-size':'12','text-anchor':'start',transform:`rotate(-90 ${x-12} ${yLabel})`});
-    nameLines.forEach((line, idx)=>{ const t=createEl('tspan',{'font-family':'Montserrat, sans-serif','font-weight':'700', x:x-12}); if(idx===0){ t.setAttribute('y', yLabel); } else { t.setAttribute('dy',14); } t.textContent=line; label.appendChild(t); });
-    const tMeta=createEl('tspan',{'font-family':'Montserrat, sans-serif','font-weight':'300', x:x-12}); tMeta.setAttribute('dy',14); tMeta.textContent=meta; label.appendChild(tMeta);
-    gPois.appendChild(label);
-
-    // Avoid collision with profile
-    let shift=0; const maxIter=30; const profileForHit=winPts;
-    for(let i=0;i<maxIter;i++){
-      label.setAttribute('transform', `rotate(-90 ${x-12-shift} ${yLabel})`);
-      label.setAttribute('x', x-12-shift);
-      label.querySelectorAll('tspan').forEach(ts=> ts.setAttribute('x', x-12-shift));
-      const bb=bboxScreen(label);
-      if(intersectsProfile(bb, profileForHit)) shift+=8; else break;
-    }
+    const name=(p.name||'POI').trim().toUpperCase(); const nameLines=splitTwoLines(name,16); const meta=`km ${(pt.d/1000).toFixed(1)}`;
+    const yLabel=Math.max(margin.t+10,yEnd-10); const label=createEl('text',{x:x-12,y:yLabel,fill:COLORS.text,'font-size':'12','text-anchor':'start',transform:`rotate(-90 ${x-12} ${yLabel})`});
+    nameLines.forEach((line,i)=>{ const t=createEl('tspan',{'font-family':'Montserrat, sans-serif','font-weight':'700', x:x-12}); if(i===0) t.setAttribute('y',yLabel); else t.setAttribute('dy',14); t.textContent=line; label.appendChild(t); });
+    const tMeta=createEl('tspan',{'font-family':'Montserrat, sans-serif','font-weight':'300', x:x-12}); tMeta.setAttribute('dy',14); tMeta.textContent=meta; label.appendChild(tMeta); gPois.appendChild(label);
   });
   svg.appendChild(gPois);
 
-  if(!suppressListRender){ renderClimbList(); renderPoiList(); }
+  // --- precise hitbox for click mapping (avoids viewBox/CSS scaling errors)
+  hitBoxEl = createEl('rect',{x:margin.l, y:margin.t, width:w, height:h, fill:'transparent', 'pointer-events':'all', id:'hitbox'});
+  svg.appendChild(hitBoxEl);
 }
 
-function renderClimbList(){ if(!state.climbs.length){ climbList.innerHTML='No climbs yet'; return; } climbList.innerHTML=''; state.climbs.forEach((c,i)=>{ const a=state.points[c.startIdx], b=state.points[c.endIdx]; const lenKm=(b.d-a.d)/1000; const slope=((b.eleS-a.eleS)/(b.d-a.d))*100; const item=document.createElement('div'); item.className='item'; const left=document.createElement('div'); const name=document.createElement('input'); name.type='text'; name.placeholder='Climb name'; name.value=c.name||''; name.oninput=()=>{ c.name=name.value; suppressListRender=true; draw(); suppressListRender=false; }; const meta=document.createElement('div'); meta.className='meta'; meta.textContent=`${lenKm.toFixed(1)} km · ${slope.toFixed(1)}%`; left.appendChild(name); left.appendChild(meta); const del=document.createElement('button'); del.className='ghost'; del.textContent='Delete'; del.onclick=()=>{ state.climbs.splice(i,1); renderClimbList(); draw(); }; item.appendChild(left); item.appendChild(del); climbList.appendChild(item); }); }
+function renderClimbList(){ const list=document.getElementById('climbList'); if(!state.climbs.length){ list.innerHTML='No climbs yet'; return; } list.innerHTML=''; state.climbs.forEach((c,i)=>{ const valid = state.points[c.startIdx] && state.points[c.endIdx]; const item=document.createElement('div'); item.className='item'; const left=document.createElement('div'); const name=document.createElement('input'); name.type='text'; name.placeholder='Climb name'; name.value=c.name||''; name.oninput=()=>{ c.name=name.value; suppressListRender=true; draw(); suppressListRender=false; }; const meta=document.createElement('div'); meta.className='meta'; if(valid){ const a=state.points[c.startIdx], b=state.points[c.endIdx]; const lenKm=(b.d-a.d)/1000; const slope=((b.eleS-a.eleS)/(b.d-a.d))*100; meta.textContent=`${lenKm.toFixed(1)} km · ${slope.toFixed(1)}%`; } else { meta.textContent='(pending indices)'; }
+  left.appendChild(name); left.appendChild(meta); const del=document.createElement('button'); del.className='ghost'; del.textContent='Delete'; del.onclick=()=>{ state.climbs.splice(i,1); renderClimbList(); draw(); }; item.appendChild(left); item.appendChild(del); list.appendChild(item); }); }
 
-function renderPoiList(){ if(!state.pois.length){ poiList.innerHTML='No POIs yet'; return; } poiList.innerHTML=''; state.pois.forEach((p,i)=>{ const pt=state.points[p.idx]; const km=(pt.d/1000).toFixed(1); const item=document.createElement('div'); item.className='item'; const left=document.createElement('div'); const name=document.createElement('input'); name.type='text'; name.placeholder='POI name'; name.value=p.name||''; name.oninput=()=>{ p.name=name.value; suppressListRender=true; draw(); suppressListRender=false; }; const meta=document.createElement('div'); meta.className='meta'; meta.textContent=`km ${km}`; left.appendChild(name); left.appendChild(meta); const del=document.createElement('button'); del.className='ghost'; del.textContent='Delete'; del.onclick=()=>{ state.pois.splice(i,1); renderPoiList(); draw(); }; item.appendChild(left); item.appendChild(del); poiList.appendChild(item); }); }
+function renderPoiList(){ const list=document.getElementById('poiList'); if(!state.pois.length){ list.innerHTML='No POIs yet'; return; } list.innerHTML=''; state.pois.forEach((p,i)=>{ const valid = Number.isFinite(p.idx) && state.points[p.idx]; const item=document.createElement('div'); item.className='item'; const left=document.createElement('div'); const name=document.createElement('input'); name.type='text'; name.placeholder='POI name'; name.value=p.name||''; name.oninput=()=>{ p.name=name.value; suppressListRender=true; draw(); suppressListRender=false; }; const meta=document.createElement('div'); meta.className='meta'; meta.textContent = valid ? `km ${(state.points[p.idx].d/1000).toFixed(1)}` : '(pending index)'; left.appendChild(name); left.appendChild(meta); const del=document.createElement('button'); del.className='ghost'; del.textContent='Delete'; del.onclick=()=>{ state.pois.splice(i,1); renderPoiList(); draw(); }; item.appendChild(left); item.appendChild(del); list.appendChild(item); }); }
 
-// ===== Export helpers (embed fonts in SVG; then export)
-async function fetchAsDataUrl(url){
-  const res=await fetch(url, {mode:'cors'}); const blob=await res.blob(); return new Promise((resolve)=>{ const fr=new FileReader(); fr.onload=()=>resolve(fr.result); fr.readAsDataURL(blob); });
-}
-
+// ===== Export helpers (embed fonts, scalable PNG)
+async function fetchAsDataUrl(url){ const res=await fetch(url,{mode:'cors'}); const blob=await res.blob(); return new Promise(r=>{ const fr=new FileReader(); fr.onload=()=>r(fr.result); fr.readAsDataURL(blob); }); }
 async function buildEmbeddedFontCSS(){
-  // Pull Google CSS and inline all @font-face as data URIs
   const cssUrls=[
     'https://fonts.googleapis.com/css2?family=Montserrat:wght@300;700;800&display=swap',
     'https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap'
@@ -349,63 +336,39 @@ async function buildEmbeddedFontCSS(){
   let fullCSS='';
   for(const cssUrl of cssUrls){
     const cssText=await (await fetch(cssUrl)).text();
-    // Replace each url(...) with data URL
     const urlRegex=/url\(([^)]+)\)/g; let m; let replaced=cssText; const promises=[]; const urls=[];
-    while((m=urlRegex.exec(cssText))!==null){ const raw=m[1].replace(/['"]/g,''); urls.push(raw); promises.push(fetchAsDataUrl(raw)); }
+    while((m=urlRegex.exec(cssText))!==null){ const raw=m[1].replace(/["']/g,''); urls.push(raw); promises.push(fetchAsDataUrl(raw)); }
     const dataUrls=await Promise.all(promises);
-    urls.forEach((u,idx)=>{ replaced=replaced.replaceAll(u, dataUrls[idx]); });
+    for(let i=0;i<urls.length;i++){ const u=urls[i]; const dat=dataUrls[i]; replaced=replaced.split(u).join(dat); }
     fullCSS+=replaced+'\n';
   }
-  // Ensure text elements use our families
-  fullCSS+=`\ntext,tspan{font-family:Montserrat, Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif}`;
+  fullCSS+='\ntext,tspan{font-family:Montserrat, Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif}';
   return fullCSS;
 }
+function currentSvgString(extraStyle=''){ const clone=svg.cloneNode(true); const styleEl=document.createElementNS(NS,'style'); styleEl.textContent=`text{fill:${COLORS.text}}`+"\n"+extraStyle; clone.insertBefore(styleEl, clone.firstChild); clone.setAttribute('xmlns',NS); return new XMLSerializer().serializeToString(clone); }
+function download(filename,dataUrl){ const a=document.createElement('a'); a.href=dataUrl; a.download=filename; document.body.appendChild(a); a.click(); a.remove(); }
 
-function currentSvgString(extraStyle=''){
-  const clone=svg.cloneNode(true);
-  // Inject style
-  const styleEl=document.createElementNS(NS,'style');
-  styleEl.textContent=`text{fill:${COLORS.text}}`+"\n"+extraStyle;
-  clone.insertBefore(styleEl, clone.firstChild);
-  // Ensure xmlns
-  clone.setAttribute('xmlns', NS);
-  const serializer=new XMLSerializer();
-  return serializer.serializeToString(clone);
-}
+document.getElementById('exportSvg').addEventListener('click', async ()=>{ if(!state.points.length) return; try{ const css=await buildEmbeddedFontCSS(); const svgStr=currentSvgString(css); const url='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svgStr); download('elevation.svg',url); }catch(e){ alert('SVG export failed.'); } });
 
-async function download(filename, dataUrl){
-  const a=document.createElement('a'); a.href=dataUrl; a.download=filename; document.body.appendChild(a); a.click(); a.remove();
-}
-
-exportSvgBtn.addEventListener('click', async ()=>{
-  if(!state.points.length) return;
-  try{
-    const fontCSS=await buildEmbeddedFontCSS();
-    const svgStr=currentSvgString(fontCSS);
-    const dataUrl='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svgStr);
-    download('elevation.svg', dataUrl);
-  }catch(err){ alert('SVG export failed.'); }
-});
-
-exportPngBtn.addEventListener('click', async ()=>{
-  if(!state.points.length) return;
-  try{
-    const fontCSS=await buildEmbeddedFontCSS();
-    const svgStr=currentSvgString(fontCSS);
+document.getElementById('exportPng').addEventListener('click', async ()=>{
+  if(!state.points.length) return; try{
+    const targetW=Math.max(640, parseInt(pngWidthInput.value||'3840',10));
+    const targetH=Math.round(targetW*(520/1280));
+    const bg=pngBgSelect.value;
+    const css=await buildEmbeddedFontCSS();
+    const svgStr=currentSvgString(css);
     const img=new Image();
     img.decoding='async';
     img.onload=()=>{
-      const canvas=document.createElement('canvas');
-      canvas.width=1280; canvas.height=520;
+      const canvas=document.createElement('canvas'); canvas.width=targetW; canvas.height=targetH;
       const ctx=canvas.getContext('2d');
-      ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,canvas.width,canvas.height);
-      ctx.drawImage(img,0,0);
-      const pngUrl=canvas.toDataURL('image/png');
-      download('elevation.png', pngUrl);
+      if(bg!=='transparent'){ ctx.fillStyle=bg; ctx.fillRect(0,0,canvas.width,canvas.height); }
+      ctx.drawImage(img,0,0,canvas.width,canvas.height);
+      canvas.toBlob(blob=>{ const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='elevation.png'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),1000); },'image/png');
     };
-    img.onerror=()=> alert('PNG export failed.');
+    img.onerror=()=>alert('PNG export failed.');
     img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svgStr);
-  }catch(err){ alert('PNG export failed.'); }
+  }catch(e){ alert('PNG export failed.'); }
 });
 </script>
 </body>
