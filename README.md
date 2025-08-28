@@ -1,6 +1,6 @@
 # Simple Elevation — User Guide (v1.8.4)
 
-A lightweight web app for turning a GPX track into a crisp, publication‑ready elevation profile with climbs, POIs, and gravel segments. This guide walks you through **all** features step‑by‑step.
+A lightweight web app for turning a GPX track into an elevation profile with climbs, POIs, and gravel segments.
 
 ---
 
@@ -188,7 +188,6 @@ When you export a project, the JSON looks like this:
 * **Label clarity**: if a climb/POI label touches the profile, nudge it with the ▲/▼ offset in the list. Small increments (8 px) are ideal.
 * **Smoothing**: 300–600 m works well for road routes; try 100–250 m for short punchy gravel routes.
 * **Grid step**: smaller steps help on compact profiles; larger steps reduce clutter on long alpine routes.
-* **Colors**: maintain high contrast between the profile outline and fills for print.
 * **KOM**: use the `KOM{HC|1..4}` prefix in the **name** to display the badge automatically (e.g., `KOMHC Colle delle Finestre`).
 
 ---
@@ -225,5 +224,3 @@ When you export a project, the JSON looks like this:
 
 * Map tiles: OpenStreetMap contributors.
 * Fonts: Montserrat & Inter.
-
-Enjoy building beautiful elevation profiles! If you need variations (brand colors, typography, badges, or data columns), the app is easily customizable.
