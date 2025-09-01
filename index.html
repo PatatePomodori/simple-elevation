@@ -89,7 +89,7 @@
 <div class="basemap-picker" style="margin:8px 0 10px 0; display:flex; align-items:center; gap:8px;">
   <label for="basemap-select" style="font-weight:600;">Basemap:</label>
   <select id="basemap-select">
-    <option value="OSM" selected>OpenStreetMap</option>
+    <option value="__KEEP__" selected>OpenStreetMap (default)</option>
     <option value="CARTO">CARTO</option>
     <option value="OpenTopoMap">OpenTopoMap</option>
   </select>
@@ -327,7 +327,8 @@ async function handleGpxXml(xml){ let ptsNodes=qAll(xml,'trkpt'); if(!ptsNodes.l
 
 function fileBaseName(n){ if(!n) return 'elevation'; return n.replace(/\.[^.]*$/,''); }
 
-gpxInput.addEventListener('change', async e=>{ try{ const file=e.target.files[0]; if(!file) return; state.projectName=fileBaseName(file.name); const text=await file.text(); const xml=await loadTextAsXml(text); await handleGpxXml(xml); }catch(err){ alert('Unable to open the GPX.'); } });
+gpxInput.addEventListener('change', async e=>{ try{ const file=e.target.files[0]; state.projectName = fileBaseName(file && file.name ? file.name : state.projectName);
+      if(!file) return; state.projectName=fileBaseName(file.name); const text=await file.text(); const xml=await loadTextAsXml(text); await handleGpxXml(xml); }catch(err){ alert('Unable to open the GPX.'); } });
 [startLabel,finishLabel,tickInput].forEach(el=> el.addEventListener('input', ()=> state.points.length&&draw()));
 yStepSel.addEventListener('change', ()=>{ state.yStep=parseInt(yStepSel.value,10)||200; state.points.length&&draw(); });
 vExagInput.addEventListener('input', ()=>{ let v=parseFloat(vExagInput.value); if(!Number.isFinite(v)) v=0.5; v=Math.min(1, Math.max(0.1, v)); state.vExag=v; vExagOut.textContent='× '+state.vExag.toFixed(2); state.points.length&&draw(); });
@@ -355,7 +356,7 @@ svg.addEventListener('mouseleave', ()=>{ if(guideGroup&&guideGroup.isConnected) 
 svg.addEventListener('click', e=>{ if((!state.selecting&&!state.selectingPoi)||!state.points.length||!hitBoxEl) return; const {viewStart,viewEnd}=getScales(); const r=hitBoxEl.getBoundingClientRect(); const xRel=Math.min(1, Math.max(0, (e.clientX - r.left)/r.width )); const dClick=viewStart + xRel*(viewEnd-viewStart); const idx=nearestIndexByD(dClick); if(state.selectingPoi){ let name=''; const pt=state.points[idx]; if(state.namedWaypoints.length){ let best=null, bestD=1e12; for(const w of state.namedWaypoints){ const d=haversine(pt.lat,pt.lon,w.lat,w.lon); if(d<bestD){bestD=d; best=w;} } if(best && bestD<5000) name=best.name; } state.pois.push({idx,name,offsetY:8}); state.selectingPoi=false; renderPoiList(true); refreshMapOverlays(); draw(); return; } if(state.selecting==='start'){ state.tempStart=idx; state.selecting='end'; } else if(state.selecting==='end'){ if(idx<=state.tempStart) return; if(state.selectingGravel){ state.gravels.push({startIdx:state.tempStart,endIdx:idx,name:'',offsetY:8}); state.focusGravelIndex=state.gravels.length-1; } else { state.climbs.push({startIdx:state.tempStart,endIdx:idx,name:'',offsetY:8}); state.focusClimbIndex=state.climbs.length-1; }
     state.selectingGravel=false; state.selecting=null; renderClimbList(true); refreshMapOverlays(); renderGravelList(true); draw(); }
 });
-function renderClimbList(focusLast){ const list=document.getElementById('climbList'); if(!state.climbs.length){ list.textContent='No climbs yet'; return; } list.innerHTML=''; state.climbs.forEach((c,i)=>{ const item=document.createElement('div'); item.className='item'; const left=document.createElement('div'); const name=document.createElement('input'); name.type='text'; name.placeholder='Climb name'; name.value=c.name||''; name.oninput=()=>{ c.name=name.value; refreshMapOverlays(); draw(); }; const meta=document.createElement('div'); meta.className='meta'; if(state.points[c.startIdx]&&state.points[c.endIdx]){ const a=state.points[c.startIdx], b=state.points[c.endIdx]; const lenKm=(b.d-a.d)/1000; const slope=((b.ele - a.ele)/Math.max(1,(b.d - a.d)))*100; meta.textContent=`${lenKm.toFixed(1)} km · ${(((b.ele - a.ele)/Math.max(1,(b.d - a.d)))*100).toFixed(1)}% · offset ${(c.offsetY||0)}px`; } else meta.textContent='(pending)'; left.appendChild(name); left.appendChild(meta); const right=document.createElement('div'); right.style.display='flex'; right.style.alignItems='center'; const nudge=document.createElement('div'); nudge.className='nudge'; const up=document.createElement('button'); up.textContent='▲'; up.onclick=()=>{ c.offsetY=(c.offsetY||0)+8; renderClimbList(); draw(); }; const down=document.createElement('button'); down.textContent='▼'; down.onclick=()=>{ c.offsetY=(c.offsetY||0)-8; renderClimbList(); draw(); }; nudge.appendChild(up); nudge.appendChild(down); const del=document.createElement('button'); del.className='del'; del.textContent='✕'; del.title='Delete climb'; del.onclick=()=>{ state.climbs.splice(i,1); renderClimbList(); refreshMapOverlays(); draw(); }; right.appendChild(nudge); right.appendChild(del); item.appendChild(left); item.appendChild(right); list.appendChild(item); if((focusLast && i===state.climbs.length-1) || state.focusClimbIndex===i){ setTimeout(()=>{ name.focus(); name.select(); state.focusClimbIndex=null; },0); } }); }
+function renderClimbList(focusLast){ const list=document.getElementById('climbList'); if(!state.climbs.length){ list.textContent='No climbs yet'; return; } list.innerHTML=''; state.climbs.forEach((c,i)=>{ const item=document.createElement('div'); item.className='item'; const left=document.createElement('div'); const name=document.createElement('input'); name.type='text'; name.placeholder='Climb name'; name.value=c.name||''; name.oninput=()=>{ c.name=name.value; refreshMapOverlays(); draw(); }; const meta=document.createElement('div'); meta.className='meta'; if(state.points[c.startIdx]&&state.points[c.endIdx]){ const a=state.points[c.startIdx], b=state.points[c.endIdx]; const lenKm=(b.d-a.d)/1000; const slope=((b.ele - a.ele)/Math.max(1,(b.d - a.d)))*100; meta.textContent=`${lenKm.toFixed(1)} km · ${slope.toFixed(1)}% · offset ${(c.offsetY||0)}px`; } else meta.textContent='(pending)'; left.appendChild(name); left.appendChild(meta); const right=document.createElement('div'); right.style.display='flex'; right.style.alignItems='center'; const nudge=document.createElement('div'); nudge.className='nudge'; const up=document.createElement('button'); up.textContent='▲'; up.onclick=()=>{ c.offsetY=(c.offsetY||0)+8; renderClimbList(); draw(); }; const down=document.createElement('button'); down.textContent='▼'; down.onclick=()=>{ c.offsetY=(c.offsetY||0)-8; renderClimbList(); draw(); }; nudge.appendChild(up); nudge.appendChild(down); const del=document.createElement('button'); del.className='del'; del.textContent='✕'; del.title='Delete climb'; del.onclick=()=>{ state.climbs.splice(i,1); renderClimbList(); refreshMapOverlays(); draw(); }; right.appendChild(nudge); right.appendChild(del); item.appendChild(left); item.appendChild(right); list.appendChild(item); if((focusLast && i===state.climbs.length-1) || state.focusClimbIndex===i){ setTimeout(()=>{ name.focus(); name.select(); state.focusClimbIndex=null; },0); } }); }
 function renderPoiList(focusLast){ const list=document.getElementById('poiList'); if(!state.pois.length){ list.textContent='No POIs yet'; return; } list.innerHTML=''; state.pois.forEach((p,i)=>{ const item=document.createElement('div'); item.className='item'; const left=document.createElement('div'); const name=document.createElement('input'); name.type='text'; name.placeholder='POI name'; name.value=p.name||''; name.oninput=()=>{ p.name=name.value; refreshMapOverlays(); draw(); }; const meta=document.createElement('div'); meta.className='meta'; meta.textContent=state.points[p.idx]?`${Math.round(state.points[p.idx].eleS)} m · km ${(state.points[p.idx].d/1000).toFixed(1)} · offset ${(p.offsetY||0)}px`:'(pending)'; left.appendChild(name); left.appendChild(meta); const right=document.createElement('div'); right.style.display='flex'; right.style.alignItems='center'; const nudge=document.createElement('div'); nudge.className='nudge'; const up=document.createElement('button'); up.textContent='▲'; up.onclick=()=>{ p.offsetY=(p.offsetY||0)+8; renderPoiList(); draw(); }; const down=document.createElement('button'); down.textContent='▼'; down.onclick=()=>{ p.offsetY=(p.offsetY||0)-8; renderPoiList(); draw(); }; nudge.appendChild(up); nudge.appendChild(down); const del=document.createElement('button'); del.className='del'; del.textContent='✕'; del.title='Delete POI'; del.onclick=()=>{ state.pois.splice(i,1); renderPoiList(); refreshMapOverlays(); draw(); }; right.appendChild(nudge); right.appendChild(del); item.appendChild(left); item.appendChild(right); list.appendChild(item); if(focusLast && i===state.pois.length-1){ setTimeout(()=>{ name.focus(); name.select(); },0); } }); }
 function renderGravelList(focusLast){ const list=document.getElementById('gravelList'); if(!state.gravels.length){ list.textContent='No gravel segments yet'; return; } list.innerHTML=''; state.gravels.forEach((g,i)=>{ const item=document.createElement('div'); item.className='item'; const left=document.createElement('div');
     const name=document.createElement('input'); name.type='text'; name.placeholder='Gravel name'; name.value=g.name||''; name.oninput=()=>{ g.name=name.value; draw(); };
@@ -390,52 +391,18 @@ exportSvgBtn.addEventListener('click', async ()=>{ if(!state.points.length) retu
 exportPngBtn.addEventListener('click', async ()=>{ if(!state.points.length) return; try{ const css=await buildEmbeddedFontCSS(); const node=currentSvgNode(css); await inlineKomImages(node); const svgStr=serializeSvg(node); const blob=new Blob([svgStr],{type:'image/svg+xml;charset=utf-8'}); const url=URL.createObjectURL(blob); const img=new Image(); img.crossOrigin='anonymous'; await new Promise((res,rej)=>{ img.onload=res; img.onerror=rej; img.src=url; }); const vb=svg.viewBox.baseVal; const scale=2; const canvas=document.createElement('canvas'); canvas.width=vb.width*scale; canvas.height=vb.height*scale; const ctx=canvas.getContext('2d'); ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.drawImage(img,0,0,canvas.width,canvas.height); URL.revokeObjectURL(url); download(exportName('png'), canvas.toDataURL('image/png')); }catch(e){ alert('PNG export failed.'); } });
 
 /* Map */
-let map, routeLayer, mapCursor, baseLayers, baseLayerControl, currentBase; let mapKomMarkers=[], mapSprintMarkers=[];
-
-
-function setupBaseLayers(){
-  const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
-    maxZoom:19, attribution:'&copy; OpenStreetMap contributors'
-  });
-  const carto = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{
-    maxZoom:20, attribution:'&copy; OpenStreetMap contributors &copy; CARTO'
-  });
-  const otm = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',{
-    maxZoom:17, attribution:'Map data: &copy; OpenStreetMap contributors, SRTM | Map style: &copy; OpenTopoMap (CC-BY-SA)'
-  });
-
-  baseLayers = { 'OSM': osm, 'CARTO': carto, 'OpenTopoMap': otm };
-
-  // Default to OSM
-  currentBase = osm;
-  currentBase.addTo(map);
-}
-
-function initBasemapDropdown(){
-  const sel=document.getElementById('basemap-select');
-  if(!sel) return;
-  sel.addEventListener('change', (e)=>{
-    const name=e.target.value;
-    const layer=baseLayers[name];
-    if(layer){
-      if(currentBase){ try{ map.removeLayer(currentBase); }catch(e){} }
-      currentBase = layer;
-      currentBase.addTo(map);
-    }
-  });
-}
-
-function buildMap(){ if(!map){ map=L.map('map',{zoomControl:true, attributionControl:false}); setupBaseLayers(); initBasemapDropdown(); map.on('mousemove', onMapMove); map.on('click', onMapClick); }
+let map, routeLayer, mapCursor; let mapKomMarkers=[], mapSprintMarkers=[];
+function buildMap(){ if(!map){ map=L.map('map',{zoomControl:true, attributionControl:false}); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18}).addTo(map); map.on('mousemove', onMapMove); map.on('click', onMapClick); }
   const latlngs=state.points.map(p=>[p.lat,p.lon]); if(routeLayer){ routeLayer.remove(); }
   routeLayer=L.polyline(latlngs,{color:'#0ea5e9',weight:3,opacity:0.9}).addTo(map); const bounds=routeLayer.getBounds(); if(bounds.isValid()) map.fitBounds(bounds.pad(0.05)); if(!mapCursor){ mapCursor=L.circleMarker([latlngs[0][0],latlngs[0][1]],{radius:6,color:'#111827',weight:2,fill:true,fillOpacity:1}); mapCursor.addTo(map); }
   refreshMapOverlays();
 }
 function clearMarkers(arr){ arr.forEach(m=>m.remove()); arr.length=0; }
-function komIconSvg(text){ return `<svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg"><circle cx="14" cy="14" r="14" fill="${COLORS.kom}"/><circle cx="14" cy="14" r="11" fill="#3ea0ff"/><circle cx="14" cy="14" r="8" fill="${COLORS.komMid}"/><text x="14" y="18" font-family="Montserrat, sans-serif" font-size="14" font-weight="800" fill="#fff" text-anchor="middle">${text}</text></svg>`; }
+function komIconSvg(text){ if(text==='0'){ text='▼'; }  return `<svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg"><circle cx="14" cy="14" r="14" fill="${COLORS.kom}"/><circle cx="14" cy="14" r="11" fill="#3ea0ff"/><circle cx="14" cy="14" r="8" fill="${COLORS.komMid}"/><text x="14" y="18" font-family="Montserrat, sans-serif" font-size="14" font-weight="800" fill="#fff" text-anchor="middle">${text}</text></svg>`; }
 function sprintIconSvg(){ return `<svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg"><circle cx="14" cy="14" r="14" fill="${COLORS.sprint}"/><circle cx="14" cy="14" r="11" fill="${COLORS.sprintMid}"/><circle cx="14" cy="14" r="8" fill="${COLORS.sprint}"/><text x="14" y="18" font-family="Montserrat, sans-serif" font-size="14" font-weight="800" fill="#fff" text-anchor="middle">S</text></svg>`; }
 function refreshMapOverlays(){ if(!map||!state.points.length) return; clearMarkers(mapKomMarkers); clearMarkers(mapSprintMarkers);
   // KOM markers at climb ends (always on)
-  state.climbs.forEach(c=>{ const kom=parseKom(c.name); if(!kom) return; const endPt=state.points[c.endIdx]; if(!endPt) return; const icon=L.divIcon({className:'se-kom', html:komIconSvg(kom.tier==='HC'?'HC':(kom.tier==='0'?'▼':kom.tier)), iconSize:[28,28], iconAnchor:[14,14]}); const m=L.marker([endPt.lat,endPt.lon],{icon,interactive:false}); m.addTo(map); mapKomMarkers.push(m); });
+  state.climbs.forEach(c=>{ const kom=parseKom(c.name); if(!kom) return; const endPt=state.points[c.endIdx]; if(!endPt) return; const icon=L.divIcon({className:'se-kom', html:komIconSvg(kom.tier==='HC'?'HC':kom.tier), iconSize:[28,28], iconAnchor:[14,14]}); const m=L.marker([endPt.lat,endPt.lon],{icon,interactive:false}); m.addTo(map); mapKomMarkers.push(m); });
   // Sprint markers at POIs (always on)
   state.pois.forEach(p=>{ if(!isSprint(p.name)) return; const pt=state.points[p.idx]; if(!pt) return; const icon=L.divIcon({className:'se-sprint', html:sprintIconSvg(), iconSize:[28,28], iconAnchor:[14,14]}); const m=L.marker([pt.lat,pt.lon],{icon,interactive:false}); m.addTo(map); mapSprintMarkers.push(m); });
 }
@@ -467,6 +434,40 @@ function projectState(){ return { meta:{version:'1.9.4', name: state.projectName
 function applyProject(p){ if(!p||!p.points) return; state.points=p.points; state.climbs=p.climbs||[]; state.pois=p.pois||[]; state.gravels=p.gravels||[]; startLabel.value=p.labels?.start||'START'; finishLabel.value=p.labels?.finish||'FINISH'; state.vExag=p.settings?.vExag||state.vExag; vExagInput.value=state.vExag; vExagOut.textContent='× '+state.vExag.toFixed(2); yStepSel.value=String(p.settings?.yStep||200); smoothInput.value=p.settings?.smooth||500; tickInput.value=p.settings?.tick||10; fillColorInput.value=p.settings?.fill||state.fillColor; lineColorInput.value=p.settings?.line||state.lineColor; climbColorInput.value=p.settings?.climbLine||state.climbColor; climbFillColorInput.value=p.settings?.climbFill||state.climbFillColor; startOffInput.value=p.settings?.startOff||0; finishOffInput.value=p.settings?.finishOff||0; state.fillColor=fillColorInput.value; state.lineColor=lineColorInput.value; state.climbColor=climbColorInput.value; state.climbFillColor=climbFillColorInput.value; state.startOffset=parseFloat(startOffInput.value)||0; state.finishOffset=parseFloat(finishOffInput.value)||0; state.minEle=Math.min(...state.points.map(p=>p.eleS)); state.maxEle=Math.max(...state.points.map(p=>p.eleS)); state.viewStart=0; state.viewEnd=state.points[state.points.length-1].d; state.projectName = (p.meta && (p.meta.name||p.meta.projectName)) ? (p.meta.name||p.meta.projectName) : 'elevation'; setButtonsEnabled(true); buildMap(); renderClimbList(); renderPoiList(); renderGravelList(); draw(); }
 exportJsonBtn.addEventListener('click',()=>{ if(!state.points.length) return; const blob=new Blob([JSON.stringify(projectState())],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=exportName('json'); document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); });
 importJsonInput.addEventListener('change', async e=>{ try{ const f=e.target.files[0]; if(!f) return; const text=await f.text(); const data=JSON.parse(text); applyProject(data); }catch(_){ alert('Import failed'); } });
+
+// Basemap dropdown: safely switch base tiles without touching map init
+(function(){
+  function init(){
+    if(typeof L==='undefined' || typeof map==='undefined' || !map) return false;
+    const sel=document.getElementById('basemap-select');
+    if(!sel) return false;
+    // Prepare layers
+    const carto = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:20, attribution:'&copy; OpenStreetMap & CARTO'});
+    const otm = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',{maxZoom:17, attribution:'Map data: &copy; OpenStreetMap contributors, SRTM | Style: &copy; OpenTopoMap (CC-BY-SA)'});
+    let currentBase=null;
+    sel.addEventListener('change', (e)=>{
+      const val=e.target.value;
+      let layer=null;
+      if(val==='CARTO') layer=carto;
+      else if(val==='OpenTopoMap') layer=otm;
+      else layer=null; // __KEEP__ means keep original
+      if(layer){
+        try{
+          // Remove first tile layer we find (original OSM) if not explicitly tracked
+          if(!currentBase){
+            map.eachLayer(l=>{ if(l && l._url && /tile\./.test(l._url)) { currentBase=l; } });
+          }
+          if(currentBase) { try{ map.removeLayer(currentBase); }catch(_){ } }
+          currentBase=layer; currentBase.addTo(map);
+        }catch(_){}
+      }
+    });
+    return true;
+  }
+  document.addEventListener('DOMContentLoaded', ()=>{
+    let tries=0; const iv=setInterval(()=>{ if(init()||tries++>50) clearInterval(iv); }, 200);
+  });
+})();
 </script>
 </body>
 </html>
